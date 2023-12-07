@@ -1,0 +1,340 @@
+#### Libraries ####
+install.packages("sf", configure.args = "--with-proj-lib=/usr/local/lib/")
+
+library(terra)
+library(pROC)
+library(caret)
+library(sf)
+library(purrr)
+library(tools)
+library(tidyverse)
+library(rsample)
+library(furrr)
+library(pbapply)
+
+library(ranger)
+
+library(tidymodels)
+library(e1071)
+library(ggridges)
+library(gridExtra)
+library(rlang)
+library(rpart.plot)
+
+update.packages()
+
+#### Functions ####
+
+source("R/clean.name.R") # scorciatoia per:
+
+clean_name <- function(file) {
+  
+  var_name <- tools::file_path_sans_ext(basename(file))   # get file name without extension
+  
+  var_name <- gsub("[^[:alnum:]_]", "", var_name)
+  
+  if (grepl("^[0-9]", var_name)) {
+    
+    var_name <- paste0("x, var_name")
+    
+  }
+  
+  var_name
+  
+}
+
+
+ridgeplot <- function(dataframe, x.variable, y.variable){
+  
+  ridge <- ggplot(dataframe, aes(x.variable, y.variable, fill = factor(stat(quantile)))) +
+  
+      stat_density_ridges(
+     
+         geom = "density_ridges_gradient", calc_ecdf = TRUE,
+     
+          quantiles = 4, quantile_lines = TRUE
+      
+    )
+  
+}
+
+#### Import data ####
+
+# orthomosaics
+
+ortho <- list.files(pattern = "Ortho", full.names = TRUE, recursive = TRUE)%>%
+  
+  set_names(nm = map(., clean_name)) %>%
+  
+  map(~rast(.))
+
+ortho <- ortho[1:5]
+
+# buffers
+
+buffers <- list.files(pattern = "buffer.*shp",
+                      
+                      full.names = TRUE, recursive = TRUE)%>%
+  
+  set_names(nm = map(., clean_name))%>%
+  
+  map(~st_read(.))
+
+buffers <- buffers[1:5]
+
+
+# Fiori ed Erba
+
+fiori <- list.files(pattern = "fiori.*shp", full.names = TRUE, recursive = TRUE)%>%
+  
+  set_names(nm =map(., clean_name)) %>%
+  
+  map(~st_read(.))%>%
+  
+  map(~.[!st_is_empty(.), ])
+
+fiori <- fiori[1:5]
+
+
+erba <- list.files(pattern = "erba.*shp", full.names = TRUE, recursive = TRUE)%>%
+  
+  set_names(nm = map(., clean_name)) %>%
+  
+  map(~st_read(.))%>%
+  
+  map(~.[!st_is_empty(.), ])                # linea di codice che esclude le geometrie vuote
+
+erba <- erba[1:5]
+
+
+
+#### Image pre-processing ####
+
+# crop orthomosaics within buffer extentions
+
+ortho<-map2(ortho, map(buffers, ~ ext(.x)), ~ crop(.x, .y))
+
+# mask orthomosaics within buffer extentions
+
+ortho<-map2(ortho, buffers, ~ mask(.x, .y))
+
+# values extraction
+
+values_fiori <- map2(ortho, fiori, ~terra::extract(.x, .y))
+
+values_erba <- map2(ortho, erba, ~terra::extract(.x, .y))
+
+# change column names for each element of the lists
+
+df_fiori <- map(values_fiori, ~{
+  
+  colnames(.) <- c("ID_poly", paste0("banda_", 1:(ncol(.)-1)))
+  
+  .
+  
+})
+
+df_erba <- map(values_erba, ~{
+  
+  colnames(.) <- c("ID_poly", paste0("banda_", 1:(ncol(.)-1)))
+  
+  .
+  
+})
+
+# convert into dataframes
+
+df_fiori_unified <- bind_rows(df_fiori, .id = "origin")   # .id = "origin": Questo argomento opzionale viene utilizzato per aggiungere 
+                                                          # una colonna chiamata "origin" al risultato finale. 
+                                                          # Questa colonna conterrà il nome dell'oggetto (in questo caso, il dataframe) 
+                                                          # da cui proviene ogni riga.
+
+df_erba_unified <- bind_rows(df_erba, .id ="origin")
+
+# add the label column to the data frames
+
+df_fiori_unified$label <- "fiore"
+
+df_erba_unified$label <- "erba"
+
+
+#### Exploratory data analysis ####
+
+summary(df_fiori_unified)
+
+summary(df_erba_unified)
+
+# using ggridges for the density plots
+
+df_tot <- rbind(df_fiori_unified, df_erba_unified) %>%
+  
+  rowid_to_column(.) %>% 
+  
+  rename(ID_pixel = rowid)
+
+
+ridge1 <- ridgeplot(df_tot, df_tot$banda_1, df_tot$label)
+
+ridge2 <- ridgeplot(df_tot, df_tot$banda_2, df_tot$label)
+
+ridge3 <- ridgeplot(df_tot, df_tot$banda_3, df_tot$label)
+
+grid.arrange(ridge1, ridge2, ridge3, ncol = 2)
+
+# scatterplot: variables relation
+
+pairs(df_fiori_unified[,3:5], pch = 19)
+
+pairs(df_erba_unified[,3:5], pch = 19)
+
+#### Data split ####
+
+# Seleziono le bande
+
+set.seed(123)
+
+# Crea un nuovo dataframe con solo le colonne che vuoi usare
+
+df_selected <- df_tot %>%
+  
+  select(banda_1, banda_2, banda_3, label)
+
+# Dividi il dataframe selezionato in set di addestramento e di test
+
+data_split <- initial_split(df_selected, prop = 0.7, strata = "label")
+
+training_data <- training(data_split)
+
+test_data <- testing(data_split)
+
+summary(training_data)
+summary(test_data)
+
+# Convertiamo in un fattore
+
+training_data$label <- as.factor(training_data$label)
+
+test_data$label <- as.factor(test_data$label)
+
+
+#### RF Model ####
+
+tuneGrid <- expand.grid(mtry = c(1, 2, 3),
+                        
+                        splitrule = "hellinger",
+                        
+                        min.node.size = c(1, 3, 5))
+
+
+# Define cross-validation strategy
+
+train_control <- trainControl(method = "cv", number = 2,
+                              
+                              savePredictions = "final",
+                              
+                              verboseIter = TRUE)
+
+
+# Train the model using ranger and the tuning grid
+
+# Calcola i pesi delle classi
+
+classi <- unique(training_data$label)
+
+class_weights <- c("erba" = 0.1, "fiore" = 0.9)
+
+
+# Addestra il modello utilizzando i pesi delle classi
+
+RF <- train(label ~ ., data = training_data,
+            
+            method = "ranger",
+            
+            num.trees = 500,
+            
+            trControl = train_control,
+            
+            tuneGrid = tuneGrid,
+            
+            class.weights = class_weights)
+
+
+plot(RF)
+
+summary(RF)
+
+print(RF)
+
+#### NNE Model ####
+
+# comprehensible alternative
+
+nnet_grid <- expand.grid(decay = c(0.5, 1e-2, 1e-3), # weight decay
+                         
+                         size = c(2,5,10)) # number of hidden units
+
+# Create training control
+
+train_control <- trainControl(method = "cv", number = 2,
+                              
+                              savePredictions = "final",
+                              
+                              verboseIter = TRUE)
+
+
+# Train the neural network using train()
+
+set.seed(123)
+
+nn_model <- train(label ~ ., 
+                  
+                  data = training_data, 
+                  
+                  method = "nnet",
+                  
+                  trControl = train_control,
+                  
+                  preProcess = c("center", "scale"),
+                  
+                  tuneGrid = nnet_grid)
+
+
+# Print the trained model
+print(nn_model)
+
+#### Model Assessment ####
+
+predizioni_RF <- predict(RF, test_data)
+
+predizioni_NNe <- predict(nn_model, test_data)
+
+
+matrice_confusione <- confusionMatrix(predizioni_RF, test_data$label, positive = "fiore")
+
+print(matrice_confusione)
+
+accuracy <- matrice_confusione$overall['Accuracy']
+
+recall <- matrice_confusione$byClass["Sensitivity"]
+
+f1 <- matrice_confusione$byClass["F1"]
+
+auc_roc <- roc(test_data$label, as.numeric(predizioni_N))
+
+auc <- auc(auc_roc)
+
+precision <- matrice_confusione$byClass["Pos Pred Value"]
+
+
+
+print(matrice_confusione)
+
+print(paste("Accuracy: ", accuracy))
+
+print(paste("Recall: ", recall))
+
+print(paste("F1-score: ", f1))
+
+print(paste("AUC-ROC", auc))
+
+print(paste("Precision: ", precision))
