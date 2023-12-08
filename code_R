@@ -1,5 +1,4 @@
 #### Libraries ####
-install.packages("sf", configure.args = "--with-proj-lib=/usr/local/lib/")
 
 library(terra)
 library(pROC)
@@ -11,17 +10,13 @@ library(tidyverse)
 library(rsample)
 library(furrr)
 library(pbapply)
-
 library(ranger)
-
 library(tidymodels)
 library(e1071)
 library(ggridges)
 library(gridExtra)
 library(rlang)
 library(rpart.plot)
-
-update.packages()
 
 #### Functions ####
 
@@ -47,18 +42,53 @@ clean_name <- function(file) {
 ridgeplot <- function(dataframe, x.variable, y.variable){
   
   ridge <- ggplot(dataframe, aes(x.variable, y.variable, fill = factor(stat(quantile)))) +
-  
-      stat_density_ridges(
-     
-         geom = "density_ridges_gradient", calc_ecdf = TRUE,
-     
-          quantiles = 4, quantile_lines = TRUE
+    
+    stat_density_ridges(
+      
+      geom = "density_ridges_gradient", calc_ecdf = TRUE,
+      
+      quantiles = 4, quantile_lines = TRUE
       
     )
   
 }
 
+
+model_scores <- function(model_predictions, response_variable){
+  
+  matrice_confusione <- confusionMatrix(model_predictions, response_variable, positive = "fiore")
+  
+  accuracy <- matrice_confusione$overall['Accuracy']
+  
+  recall <- matrice_confusione$byClass["Sensitivity"]
+  
+  f1 <- matrice_confusione$byClass["F1"]
+  
+  auc_roc <- roc(test_data$label, as.numeric(model_predictions))
+  
+  auc <- auc(auc_roc)
+  
+  precision <- matrice_confusione$byClass["Pos Pred Value"]
+  
+  
+  
+  print(matrice_confusione)
+  
+  print(paste("Accuracy: ", accuracy))
+  
+  print(paste("Recall: ", recall))
+  
+  print(paste("F1-score: ", f1))
+  
+  print(paste("AUC-ROC", auc))
+  
+  print(paste("Precision: ", precision))
+  
+}
+
 #### Import data ####
+
+setwd("C:/Esame_ML")
 
 # orthomosaics
 
@@ -68,7 +98,7 @@ ortho <- list.files(pattern = "Ortho", full.names = TRUE, recursive = TRUE)%>%
   
   map(~rast(.))
 
-ortho <- ortho[1:5]
+ortho <- ortho[1:2]
 
 # buffers
 
@@ -80,7 +110,7 @@ buffers <- list.files(pattern = "buffer.*shp",
   
   map(~st_read(.))
 
-buffers <- buffers[1:5]
+buffers <- buffers[1:2]
 
 
 # Fiori ed Erba
@@ -93,7 +123,7 @@ fiori <- list.files(pattern = "fiori.*shp", full.names = TRUE, recursive = TRUE)
   
   map(~.[!st_is_empty(.), ])
 
-fiori <- fiori[1:5]
+fiori <- fiori[1:2]
 
 
 erba <- list.files(pattern = "erba.*shp", full.names = TRUE, recursive = TRUE)%>%
@@ -104,7 +134,7 @@ erba <- list.files(pattern = "erba.*shp", full.names = TRUE, recursive = TRUE)%>
   
   map(~.[!st_is_empty(.), ])                # linea di codice che esclude le geometrie vuote
 
-erba <- erba[1:5]
+erba <- erba[1:2]
 
 
 
@@ -145,9 +175,9 @@ df_erba <- map(values_erba, ~{
 # convert into dataframes
 
 df_fiori_unified <- bind_rows(df_fiori, .id = "origin")   # .id = "origin": Questo argomento opzionale viene utilizzato per aggiungere 
-                                                          # una colonna chiamata "origin" al risultato finale. 
-                                                          # Questa colonna conterrà il nome dell'oggetto (in questo caso, il dataframe) 
-                                                          # da cui proviene ogni riga.
+# una colonna chiamata "origin" al risultato finale. 
+# Questa colonna conterrà il nome dell'oggetto (in questo caso, il dataframe) 
+# da cui proviene ogni riga.
 
 df_erba_unified <- bind_rows(df_erba, .id ="origin")
 
@@ -197,7 +227,9 @@ set.seed(123)
 
 df_selected <- df_tot %>%
   
-  select(banda_1, banda_2, banda_3, label)
+  select(banda_1, banda_2, banda_3, label) %>%
+  
+  na.omit()
 
 # Dividi il dataframe selezionato in set di addestramento e di test
 
@@ -206,6 +238,7 @@ data_split <- initial_split(df_selected, prop = 0.7, strata = "label")
 training_data <- training(data_split)
 
 test_data <- testing(data_split)
+
 
 summary(training_data)
 summary(test_data)
@@ -246,7 +279,9 @@ class_weights <- c("erba" = 0.1, "fiore" = 0.9)
 
 # Addestra il modello utilizzando i pesi delle classi
 
-RF <- train(label ~ ., data = training_data,
+RF <- train(label ~ ., 
+            
+            data = training_data,
             
             method = "ranger",
             
@@ -309,32 +344,51 @@ predizioni_RF <- predict(RF, test_data)
 predizioni_NNe <- predict(nn_model, test_data)
 
 
-matrice_confusione <- confusionMatrix(predizioni_RF, test_data$label, positive = "fiore")
+model_scores(predizioni_NNe, test_data$label)
 
-print(matrice_confusione)
-
-accuracy <- matrice_confusione$overall['Accuracy']
-
-recall <- matrice_confusione$byClass["Sensitivity"]
-
-f1 <- matrice_confusione$byClass["F1"]
-
-auc_roc <- roc(test_data$label, as.numeric(predizioni_N))
-
-auc <- auc(auc_roc)
-
-precision <- matrice_confusione$byClass["Pos Pred Value"]
+#### Raster creation ####
 
 
+# aggiustiamo i nomi
 
-print(matrice_confusione)
+ortho$Ortho_EL1$`Ortho_EL1_4` <- NULL
 
-print(paste("Accuracy: ", accuracy))
+ortho <- map(ortho, function(x) {
+  
+  names(x) <- colnames(df_selected)[1:3]
+  
+  return(x)
+  
+})
 
-print(paste("Recall: ", recall))
 
-print(paste("F1-score: ", f1))
 
-print(paste("AUC-ROC", auc))
+# Creare una lista vuota per memorizzare i risultati
 
-print(paste("Precision: ", precision))
+classificazione_RF_list <- list()
+
+# Ciclo for per applicare predizioni modelli a tutti gli elementi di ortho
+
+for (name in names(ortho)) {
+  
+  previsioni <- terra::predict(ortho[[name]], nn_model, na.rm = TRUE)
+  
+  classificazione_RF_list[[name]] <- previsioni
+
+}
+
+
+# Salvare la classificazione in formato GeoTiff
+
+names(classificazione_RF_list) <- names(ortho) # Assicuriamoci che i nomi corrispondano
+
+
+walk(names(classificazione_RF_list), function(name) {
+  
+  terra::writeRaster(classificazione_RF_list[[name]],
+                     
+                     filename = paste0(name, ".tif"),
+                     
+                     overwrite = TRUE)
+  
+})
