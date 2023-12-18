@@ -98,7 +98,7 @@ ortho <- list.files(pattern = "Ortho", full.names = TRUE, recursive = TRUE)%>%
   
   map(~rast(.))
 
-ortho <- ortho[1:2]
+ortho <- ortho[1]
 
 # buffers
 
@@ -110,7 +110,7 @@ buffers <- list.files(pattern = "buffer.*shp",
   
   map(~st_read(.))
 
-buffers <- buffers[1:2]
+buffers <- buffers[1]
 
 
 # Fiori ed Erba
@@ -123,7 +123,7 @@ fiori <- list.files(pattern = "fiori.*shp", full.names = TRUE, recursive = TRUE)
   
   map(~.[!st_is_empty(.), ])
 
-fiori <- fiori[1:2]
+fiori <- fiori[1]
 
 
 erba <- list.files(pattern = "erba.*shp", full.names = TRUE, recursive = TRUE)%>%
@@ -134,7 +134,7 @@ erba <- list.files(pattern = "erba.*shp", full.names = TRUE, recursive = TRUE)%>
   
   map(~.[!st_is_empty(.), ])                # linea di codice che esclude le geometrie vuote
 
-erba <- erba[1:2]
+erba <- erba[1]
 
 
 
@@ -142,11 +142,11 @@ erba <- erba[1:2]
 
 # crop orthomosaics within buffer extentions
 
-ortho<-map2(ortho, map(buffers, ~ ext(.x)), ~ crop(.x, .y))
+ortho <- map2(ortho, map(buffers, ~ ext(.x)), ~ crop(.x, .y))
 
 # mask orthomosaics within buffer extentions
 
-ortho<-map2(ortho, buffers, ~ mask(.x, .y))
+ortho <- map2(ortho, buffers, ~ mask(.x, .y))
 
 # values extraction
 
@@ -190,10 +190,6 @@ df_erba_unified$label <- "erba"
 
 #### Exploratory data analysis ####
 
-summary(df_fiori_unified)
-
-summary(df_erba_unified)
-
 # using ggridges for the density plots
 
 df_tot <- rbind(df_fiori_unified, df_erba_unified) %>%
@@ -202,12 +198,37 @@ df_tot <- rbind(df_fiori_unified, df_erba_unified) %>%
   
   rename(ID_pixel = rowid)
 
+# Seleziono le bande
 
-ridge1 <- ridgeplot(df_tot, df_tot$banda_1, df_tot$label)
+set.seed(123)
 
-ridge2 <- ridgeplot(df_tot, df_tot$banda_2, df_tot$label)
+# Crea un nuovo dataframe con solo le colonne che vuoi usare
 
-ridge3 <- ridgeplot(df_tot, df_tot$banda_3, df_tot$label)
+sum(is.na(df_tot))
+
+df_selected <- df_tot %>%
+  
+  select(banda_1, banda_2, banda_3, label) %>%
+  
+  na.omit()
+
+
+# calculate the main summary statistics
+
+summary(df_erba_unified)
+
+summary(df_fiori_unified)
+
+# calcualte the interquantile range
+
+IQR(df_fiori_unified)
+
+
+ridge1 <- ridgeplot(df_selected, df_selected$banda_1, df_selected$label)
+
+ridge2 <- ridgeplot(df_selected, df_selected$banda_2, df_selected$label)
+
+ridge3 <- ridgeplot(df_selected, df_selected$banda_3, df_selected$label)
 
 grid.arrange(ridge1, ridge2, ridge3, ncol = 2)
 
@@ -218,18 +239,6 @@ pairs(df_fiori_unified[,3:5], pch = 19)
 pairs(df_erba_unified[,3:5], pch = 19)
 
 #### Data split ####
-
-# Seleziono le bande
-
-set.seed(123)
-
-# Crea un nuovo dataframe con solo le colonne che vuoi usare
-
-df_selected <- df_tot %>%
-  
-  select(banda_1, banda_2, banda_3, label) %>%
-  
-  na.omit()
 
 # Dividi il dataframe selezionato in set di addestramento e di test
 
@@ -344,10 +353,41 @@ predizioni_RF <- predict(RF, test_data)
 predizioni_NNe <- predict(nn_model, test_data)
 
 
-model_scores(predizioni_NNe, test_data$label)
+scores_RF <- model_scores(predizioni_RF, test_data$label)
+
+scores_NNe <- model_scores(predizioni_NNe, test_data$label)
+
+
+#### Model Comparison ####
+
+# extract the confusion matrices
+
+matrice_confusione_RF <- confusionMatrix(predizioni_RF, test_data$label, positive = "fiore")
+
+matrice_confusione_NNe <- confusionMatrix(predizioni_NNe, test_data$label, positive = "fiore")
+
+
+# create the contingency matrix
+
+Model1 <- c(sum(matrice_confusione_RF$table[1, 1], matrice_confusione_RF$table[2, 2]), 
+            sum(matrice_confusione_RF$table[1, 2], matrice_confusione_RF$table[2, 1]))
+
+Model2 <- c(sum(matrice_confusione_NNe$table[1, 1], matrice_confusione_NNe$table[2, 2]), 
+            sum(matrice_confusione_NNe$table[1, 2], matrice_confusione_NNe$table[2, 1]))
+
+table <- c(Model2[1], 0, Model1[1] - Model2[1], 1)
+
+matrix <- matrix(table, nrow = 2, ncol = 2)
+
+
+# McNemar test for algorithm comparison, alfa = 0.5
+
+test <- mcnemar.test(matrix)
+
+print(test)
+
 
 #### Raster creation ####
-
 
 # aggiustiamo i nomi
 
