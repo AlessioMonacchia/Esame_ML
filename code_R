@@ -1,5 +1,5 @@
 #### Libraries ####
-install.packages("Rtools")
+
 library(terra)
 library(pROC)
 library(caret)
@@ -315,7 +315,7 @@ test_data$label <- as.factor(test_data$label)
 
 #### RF Model ####
 
-tuneGrid <- expand.grid(mtry = c(1, 2, 3),
+RFGrid <- expand.grid(mtry = c(1, 2, 3),
                         
                         splitrule = "hellinger",
                         
@@ -361,11 +361,46 @@ plot(RF)
 
 print(RF)
 
+
+#### K-nearest neighbor model ####
+
+KNNGrid <- expand.grid(k = c(3, 5, 10))
+
+# Addestra il modello utilizzando i pesi delle classi
+
+KNN <- train(label ~ ., 
+            
+            data = training_data,
+            
+            method = "knn",
+            
+            trControl = train_control,
+            
+            tuneGrid = KNNGrid)
+
+
+
+#### Support Vector Machines model ####
+
+SVMGrid <- expand.grid(cost = c(5, 10, 15, 20, 50))
+
+# Addestra il modello utilizzando i pesi delle classi
+
+SVM <- train(label ~ ., 
+             
+             data = training_data,
+             
+             method = "svmLinear2",
+             
+             trControl = train_control,
+             
+             tuneGrid = SVMGrid)
+
 #### NNE Model ####
 
 # comprehensible alternative
 
-nnet_grid <- expand.grid(decay = c(0.5, 1e-2, 1e-3), # weight decay
+NNE_grid <- expand.grid(decay = c(0.5, 1e-2, 1e-3), # weight decay
                          
                          size = c(2,5,10)) # number of hidden units
 
@@ -374,7 +409,7 @@ nnet_grid <- expand.grid(decay = c(0.5, 1e-2, 1e-3), # weight decay
 
 set.seed(123)
 
-nn_model <- train(label ~ ., 
+NNE <- train(label ~ ., 
                   
                   data = training_data, 
                   
@@ -382,23 +417,31 @@ nn_model <- train(label ~ .,
                   
                   trControl = train_control,
                   
-                  tuneGrid = nnet_grid)
+                  tuneGrid = NNE_grid)
 
 
 # Print the trained model
 
-plot(nn_model)
+plot(NNE)
 
-print(nn_model)
+print(NNE)
 
 ### Model Assessment ####
 
 predizioni_RF <- predict(RF, test_data)
 
+predizioni_KNN <- predict(KNN, test_data)
+
+predizioni_SVM <- predict(SVM, test_data)
+
 predizioni_NNe <- predict(nn_model, test_data)
 
 
 scores_RF <- model_scores(predizioni_RF, test_data$label)
+
+scores_kNN <- model_scores(predizioni_KNN, test_data$label)
+
+scores_SVM <- model_scores(predizioni_SVM, test_data$label)
 
 scores_NNe <- model_scores(predizioni_NNe, test_data$label)
 
