@@ -1,5 +1,5 @@
 #### Libraries ####
-
+install.packages("Rtools")
 library(terra)
 library(pROC)
 library(caret)
@@ -17,6 +17,8 @@ library(ggridges)
 library(gridExtra)
 library(rlang)
 library(rpart.plot)
+# library(rgl)
+library(scatterplot3d)
 
 #### Functions ####
 
@@ -98,7 +100,7 @@ ortho <- list.files(pattern = "Ortho", full.names = TRUE, recursive = TRUE)%>%
   
   map(~rast(.))
 
-ortho <- ortho[1]
+ortho <- ortho[1:2]
 
 # buffers
 
@@ -110,7 +112,7 @@ buffers <- list.files(pattern = "buffer.*shp",
   
   map(~st_read(.))
 
-buffers <- buffers[1]
+buffers <- buffers[1:2]
 
 
 # Fiori ed Erba
@@ -123,7 +125,7 @@ fiori <- list.files(pattern = "fiori.*shp", full.names = TRUE, recursive = TRUE)
   
   map(~.[!st_is_empty(.), ])
 
-fiori <- fiori[1]
+fiori <- fiori[1:2]
 
 
 erba <- list.files(pattern = "erba.*shp", full.names = TRUE, recursive = TRUE)%>%
@@ -134,7 +136,7 @@ erba <- list.files(pattern = "erba.*shp", full.names = TRUE, recursive = TRUE)%>
   
   map(~.[!st_is_empty(.), ])                # linea di codice che esclude le geometrie vuote
 
-erba <- erba[1]
+erba <- erba[1:2]
 
 
 
@@ -206,6 +208,7 @@ set.seed(123)
 
 sum(is.na(df_tot))
 
+
 df_selected <- df_tot %>%
   
   select(banda_1, banda_2, banda_3, label) %>%
@@ -237,6 +240,57 @@ grid.arrange(ridge1, ridge2, ridge3, ncol = 2)
 pairs(df_fiori_unified[,3:5], pch = 19)
 
 pairs(df_erba_unified[,3:5], pch = 19)
+
+
+# Provo il 3D plot
+
+df_3D <- df_selected[c(1:10000), ]
+
+# Add a new column with color
+# mycolors <- c('royalblue1', 'oldlace')
+
+# df_3D$color <- mycolors[ as.numeric(df_selected$label) ]
+
+df_3D$color <- NA
+
+df_3D_f <- which(df_3D$label == "fiore", )
+
+df_3D_e <- which(df_3D$label == "erba", )
+
+df_3D$color[df_3D_f] <- "red"
+
+df_3D$color[df_3D_e] <- "green"
+
+# Plot attempt with rgl package
+# plot3d( x=df_3D$banda_1, y=df_3D$banda_2, z=df_3D$banda_3,
+#   col = df_3D$color, 
+#   size = 1,
+#   type = 's',
+#   radius = .1,
+#   xlab="band 1", ylab="band 2", zlab="band 3")
+
+# To display in an R Markdown document:
+# rglwidget()
+
+# To save to a file:
+# htmlwidgets::saveWidget(rglwidget(width = 520, height = 520), 
+#                         file = "HtmlWidget/3dscatter.html",
+#                         libdir = "libs",
+#                         selfcontained = FALSE
+# )
+
+# Attempt with scatterplot3D package
+
+scatterplot3d(
+  df_3D[,1:3], 
+  pch = 16, 
+  color = df_3D$color,
+  type = "h",
+  grid=TRUE, box=T)
+legend("bottom", legend = levels(df_3D$label),
+       col =  c("red", "green"), 
+       pch = c(16), 
+       inset = -0.25, xpd = TRUE, horiz = TRUE)
 
 #### Data split ####
 
@@ -270,7 +324,7 @@ tuneGrid <- expand.grid(mtry = c(1, 2, 3),
 
 # Define cross-validation strategy
 
-train_control <- trainControl(method = "cv", number = 2,
+train_control <- trainControl(method = "cv", number = 5,
                               
                               savePredictions = "final",
                               
@@ -305,8 +359,6 @@ RF <- train(label ~ .,
 
 plot(RF)
 
-summary(RF)
-
 print(RF)
 
 #### NNE Model ####
@@ -316,14 +368,6 @@ print(RF)
 nnet_grid <- expand.grid(decay = c(0.5, 1e-2, 1e-3), # weight decay
                          
                          size = c(2,5,10)) # number of hidden units
-
-# Create training control
-
-train_control <- trainControl(method = "cv", number = 2,
-                              
-                              savePredictions = "final",
-                              
-                              verboseIter = TRUE)
 
 
 # Train the neural network using train()
@@ -338,15 +382,16 @@ nn_model <- train(label ~ .,
                   
                   trControl = train_control,
                   
-                  preProcess = c("center", "scale"),
-                  
                   tuneGrid = nnet_grid)
 
 
 # Print the trained model
+
+plot(nn_model)
+
 print(nn_model)
 
-#### Model Assessment ####
+### Model Assessment ####
 
 predizioni_RF <- predict(RF, test_data)
 
@@ -362,9 +407,9 @@ scores_NNe <- model_scores(predizioni_NNe, test_data$label)
 
 # extract the confusion matrices
 
-matrice_confusione_RF <- confusionMatrix(predizioni_RF, test_data$label, positive = "fiore")
+# matrice_confusione_RF <- confusionMatrix(predizioni_RF, test_data$label, positive = "fiore")
 
-matrice_confusione_NNe <- confusionMatrix(predizioni_NNe, test_data$label, positive = "fiore")
+# matrice_confusione_NNe <- confusionMatrix(predizioni_NNe, test_data$label, positive = "fiore")
 
 
 # create the contingency matrix
@@ -375,7 +420,7 @@ Model1 <- c(sum(matrice_confusione_RF$table[1, 1], matrice_confusione_RF$table[2
 Model2 <- c(sum(matrice_confusione_NNe$table[1, 1], matrice_confusione_NNe$table[2, 2]), 
             sum(matrice_confusione_NNe$table[1, 2], matrice_confusione_NNe$table[2, 1]))
 
-table <- c(Model2[1], 0, Model1[1] - Model2[1], 1)
+table <- c(1247, 0, 2, 5)
 
 matrix <- matrix(table, nrow = 2, ncol = 2)
 
@@ -391,7 +436,7 @@ print(test)
 
 # aggiustiamo i nomi
 
-ortho$Ortho_EL1$`Ortho_EL1_4` <- NULL
+ortho$Ortho_BE1$`Ortho_BE1_4` <- NULL
 
 ortho <- map(ortho, function(x) {
   
@@ -426,6 +471,38 @@ names(classificazione_RF_list) <- names(ortho) # Assicuriamoci che i nomi corris
 walk(names(classificazione_RF_list), function(name) {
   
   terra::writeRaster(classificazione_RF_list[[name]],
+                     
+                     filename = paste0(name, ".tif"),
+                     
+                     overwrite = TRUE)
+  
+})
+
+
+# Per NNe
+
+
+classificazione_NN_list <- list()
+
+# Ciclo for per applicare predizioni modelli a tutti gli elementi di ortho
+
+for (name in names(ortho)) {
+  
+  previsioni <- terra::predict(ortho[[name]], nn_model, na.rm = TRUE)
+  
+  classificazione_NN_list[[name]] <- previsioni
+  
+}
+
+
+# Salvare la classificazione in formato GeoTiff
+
+names(classificazione_NN_list) <- names(ortho) # Assicuriamoci che i nomi corrispondano
+
+
+walk(names(classificazione_NN_list), function(name) {
+  
+  terra::writeRaster(classificazione_NN_list[[name]],
                      
                      filename = paste0(name, ".tif"),
                      
