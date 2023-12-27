@@ -324,7 +324,7 @@ RFGrid <- expand.grid(mtry = c(1, 2, 3),
 
 # Define cross-validation strategy
 
-train_control <- trainControl(method = "cv", number = 5,
+train_control <- trainControl(method = "cv", number = 2,
                               
                               savePredictions = "final",
                               
@@ -434,7 +434,7 @@ predizioni_KNN <- predict(KNN, test_data)
 
 predizioni_SVM <- predict(SVM, test_data)
 
-predizioni_NNe <- predict(nn_model, test_data)
+predizioni_NNE <- predict(nn_model, test_data)
 
 
 scores_RF <- model_scores(predizioni_RF, test_data$label)
@@ -443,7 +443,7 @@ scores_kNN <- model_scores(predizioni_KNN, test_data$label)
 
 scores_SVM <- model_scores(predizioni_SVM, test_data$label)
 
-scores_NNe <- model_scores(predizioni_NNe, test_data$label)
+scores_NNE <- model_scores(predizioni_NNe, test_data$label)
 
 
 #### Model Comparison ####
@@ -457,23 +457,53 @@ scores_NNe <- model_scores(predizioni_NNe, test_data$label)
 
 # create the contingency matrix
 
-Model1 <- c(sum(matrice_confusione_RF$table[1, 1], matrice_confusione_RF$table[2, 2]), 
-            sum(matrice_confusione_RF$table[1, 2], matrice_confusione_RF$table[2, 1]))
+# Model1 <- c(sum(matrice_confusione_RF$table[1, 1], matrice_confusione_RF$table[2, 2]), 
+            # sum(matrice_confusione_RF$table[1, 2], matrice_confusione_RF$table[2, 1]))
 
-Model2 <- c(sum(matrice_confusione_NNe$table[1, 1], matrice_confusione_NNe$table[2, 2]), 
-            sum(matrice_confusione_NNe$table[1, 2], matrice_confusione_NNe$table[2, 1]))
+# Model2 <- c(sum(matrice_confusione_NNe$table[1, 1], matrice_confusione_NNe$table[2, 2]), 
+            # sum(matrice_confusione_NNe$table[1, 2], matrice_confusione_NNe$table[2, 1]))
 
-table <- c(1247, 0, 2, 5)
+# table <- c(1247, 0, 2, 5)
 
-matrix <- matrix(table, nrow = 2, ncol = 2)
+# matrix <- matrix(table, nrow = 2, ncol = 2)
 
 
 # McNemar test for algorithm comparison, alfa = 0.5
 
-test <- mcnemar.test(matrix)
+# test <- mcnemar.test(matrix)
 
-print(test)
+# print(test)
 
+
+# For multiple comparisons
+
+model1 <- ifelse(as.vector(predizioni_RF) >= as.vector(test_data$label), 1, 0)
+
+model2 <- ifelse(as.vector(predizioni_KNN) >= as.vector(test_data$label), 1, 0)
+
+model3 <- ifelse(as.vector(predizioni_SVM) >= as.vector(test_data$label), 1, 0)
+
+model4 <- ifelse(as.vector(predizioni_NNE) >= as.vector(test_data$label), 1, 0)
+
+# or
+
+r1 <- as.numeric(p >= u)
+
+
+# Then apply the Cochran's Q test
+
+cochran.qtest(formula, alpha = 0.05, p.method = "fdr")
+
+
+# Then apply the Mcnemar test with Bonferroni's correction
+
+pairwise_mcnemar_test(
+  data,
+  formula,
+  type = c("mcnemar", "exact"),
+  correct = TRUE,
+  p.adjust.method = "bonferroni"
+)
 
 #### Raster creation ####
 
