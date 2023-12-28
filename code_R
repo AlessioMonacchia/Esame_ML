@@ -19,6 +19,8 @@ library(rlang)
 library(rpart.plot)
 # library(rgl)
 library(scatterplot3d)
+library(RVAideMemoire)
+library(rstatix)
 
 #### Functions ####
 
@@ -417,7 +419,9 @@ NNE <- train(label ~ .,
                   
                   trControl = train_control,
                   
-                  tuneGrid = NNE_grid)
+                  tuneGrid = NNE_grid,
+             
+                  class.weights = class_weights)
 
 
 # Print the trained model
@@ -476,34 +480,71 @@ scores_NNE <- model_scores(predizioni_NNe, test_data$label)
 
 
 # For multiple comparisons
+# Prapare the data for the Cochran's Q test
 
-model1 <- ifelse(as.vector(predizioni_RF) >= as.vector(test_data$label), 1, 0)
+model1 <- data.frame(
+  outcome = ifelse(as.vector(predizioni_RF) >= as.vector(test_data$label), 1, 0),
+  algorithm = gl(1, length(predizioni_RF), length(predizioni_RF), labels = "RF"),
+  ID = 1:length(predizioni_RF))
 
-model2 <- ifelse(as.vector(predizioni_KNN) >= as.vector(test_data$label), 1, 0)
+model2 <- data.frame(
+  outcome = ifelse(as.vector(predizioni_KNN) >= as.vector(test_data$label), 1, 0),
+  algorithm = gl(1, length(predizioni_KNN), length(predizioni_KNN), labels = "KNN"),
+  ID = 1:length(predizioni_KNN))
 
-model3 <- ifelse(as.vector(predizioni_SVM) >= as.vector(test_data$label), 1, 0)
+model3 <- data.frame(
+  outcome = ifelse(as.vector(predizioni_SVM) >= as.vector(test_data$label), 1, 0),
+  algorithm = gl(1, length(predizioni_SVM), length(predizioni_SVM), labels = "SVM"),
+  ID = 1:length(predizioni_SVM))
 
-model4 <- ifelse(as.vector(predizioni_NNE) >= as.vector(test_data$label), 1, 0)
+model4 <- data.frame(
+  outcome = ifelse(as.vector(predizioni_NNE) >= as.vector(test_data$label), 1, 0),
+  algorithm = gl(1, length(predizioni_NNE), length(predizioni_NNE), labels = "NNE"),
+  ID = 1:length(predizioni_NNE))
 
 # or
 
-r1 <- as.numeric(p >= u)
+# r1 <- as.numeric(p >= u)
+
+# Bind in a single dataframe
+
+Test <- rbind(model1, model2, model3, model4)
+
+
+
+# convert the outcome into a factor with 2 levels
+
+Test$outcome <- factor(
+  
+  Test$outcome, levels = c(1, 0),
+  
+  labels = c("success", "failure")
+  
+)
+
+
+# Cross-tabulation: create a contingency table from cross-classifying factors
+
+xtabs(~outcome + algorithm, Test)
 
 
 # Then apply the Cochran's Q test
 
-cochran.qtest(formula, alpha = 0.05, p.method = "fdr")
+cochran.qtest(outcome ~ algorithm|ID, Test)
 
 
 # Then apply the Mcnemar test with Bonferroni's correction
 
-pairwise_mcnemar_test(
-  data,
-  formula,
-  type = c("mcnemar", "exact"),
-  correct = TRUE,
-  p.adjust.method = "bonferroni"
-)
+pairwise_mcnemar_test(Test, outcome ~ algorithm|ID)
+
+# OR
+
+# pairwise_mcnemar_test(data,
+#  formula,
+#  type = c("mcnemar", "exact"),
+#  correct = TRUE,
+#  p.adjust.method = "bonferroni"
+#)
 
 #### Raster creation ####
 
