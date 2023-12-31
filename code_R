@@ -92,7 +92,7 @@ model_scores <- function(model_predictions, response_variable){
 
 #### Import data ####
 
-setwd("C:/Esame_ML")
+setwd("/home/alessio/Esame_ML")
 
 # orthomosaics
 
@@ -102,7 +102,7 @@ ortho <- list.files(pattern = "Ortho", full.names = TRUE, recursive = TRUE)%>%
   
   map(~rast(.))
 
-ortho <- ortho[1:3]
+ortho <- ortho[1:5]
 
 # buffers
 
@@ -114,7 +114,7 @@ buffers <- list.files(pattern = "buffer.*shp",
   
   map(~st_read(.))
 
-buffers <- buffers[1:3]
+buffers <- buffers[1:5]
 
 
 # Fiori ed Erba
@@ -127,7 +127,7 @@ fiori <- list.files(pattern = "fiori.*shp", full.names = TRUE, recursive = TRUE)
   
   map(~.[!st_is_empty(.), ])
 
-fiori <- fiori[1:3]
+fiori <- fiori[1:5]
 
 
 erba <- list.files(pattern = "erba.*shp", full.names = TRUE, recursive = TRUE)%>%
@@ -138,7 +138,7 @@ erba <- list.files(pattern = "erba.*shp", full.names = TRUE, recursive = TRUE)%>
   
   map(~.[!st_is_empty(.), ])                # linea di codice che esclude le geometrie vuote
 
-erba <- erba[1:3]
+erba <- erba[1:5]
 
 
 
@@ -252,7 +252,7 @@ pairs(df_erba_unified[,3:5], pch = 19)
 
 # Provo il 3D plot
 
-df_3D <- df_selected[c(1:10000), ]
+df_3D <- df_selected[c(1:100000), ]
 
 # Add a new column with color
 # mycolors <- c('royalblue1', 'oldlace')
@@ -293,12 +293,12 @@ scatterplot3d(
   df_3D[,1:3], 
   pch = 16, 
   color = df_3D$color,
-  type = "h",
-  grid=TRUE, box=T)
-legend("bottom", legend = levels(df_3D$label),
+  #type = "h",
+  grid=T, box=T)
+legend("bottom", legend = c("flower", "grass"),
        col =  c("red", "green"), 
        pch = c(16), 
-       inset = -0.25, xpd = TRUE, horiz = TRUE)
+       inset = -0.25, xpd = T, horiz = T)
 
 #### Data split ####
 
@@ -344,10 +344,10 @@ class_weights <- c("erba" = 0.1, "fiore" = 0.9)
 # Define tuning parameters
 
 RFGrid <- expand.grid(mtry = c(1, 2, 3),
-                        
-                        splitrule = "hellinger",
-                        
-                        min.node.size = c(1, 3, 5))
+                      
+                      splitrule = "hellinger",
+                      
+                      min.node.size = c(1, 3, 5))
 
 
 # Addestra il modello utilizzando i pesi delle classi
@@ -382,22 +382,23 @@ KNNGrid <- expand.grid(k = c(3, 5, 10))
 # Addestra il modello utilizzando i pesi delle classi
 
 KNN <- train(label ~ ., 
-            
-            data = training_data,
-            
-            method = "knn",
-            
-            trControl = train_control,
-            
-            tuneGrid = KNNGrid)
+             
+             data = training_data,
+             
+             method = "knn",
+             
+             trControl = train_control,
+             
+             tuneGrid = KNNGrid)
 
 
+plot(KNN)
 
 #### Support Vector Machines model ####
 
 # tuning parameters
 
-SVMGrid <- expand.grid(cost = c(5, 10, 15, 20, 50))
+SVMGrid <- expand.grid(cost = c(10, 20, 50))
 
 
 # Addestra il modello utilizzando i pesi delle classi
@@ -415,13 +416,15 @@ SVM <- train(label ~ .,
              class.weights = class_weights)
 
 
+plot(SVM)
+
 #### NNE Model ####
 
 # comprehensible alternative
 
 NNE_grid <- expand.grid(decay = c(0.5, 1e-2, 1e-3), # weight decay
-                         
-                         size = c(2, 5, 10)) # number of hidden units
+                        
+                        size = c(2, 5, 10)) # number of hidden units
 
 
 # Train the neural network using train()
@@ -429,16 +432,16 @@ NNE_grid <- expand.grid(decay = c(0.5, 1e-2, 1e-3), # weight decay
 set.seed(123)
 
 NNE <- train(label ~ ., 
-                  
-                  data = training_data, 
-                  
-                  method = "nnet",
-                  
-                  trControl = train_control,
-                  
-                  tuneGrid = NNE_grid, 
-                  
-                  class.weights = class_weights)
+             
+             data = training_data, 
+             
+             method = "nnet",
+             
+             trControl = train_control,
+             
+             tuneGrid = NNE_grid, 
+             
+             class.weights = class_weights)
 
 
 # Print the trained model
@@ -473,24 +476,28 @@ scores_NNE <- model_scores(predizioni_NNE, test_data$label)
 # Prapare the data for the Cochran's Q test
 
 model1 <- data.frame(
-  outcome = ifelse(as.vector(predizioni_RF) >= as.vector(test_data$label), 1, 0),
+  outcome = ifelse(as.vector(predizioni_RF) == as.vector(test_data$label), 1, 0),
   algorithm = gl(1, length(predizioni_RF), length(predizioni_RF), labels = "RF"),
-  ID = 1:length(predizioni_RF))
+  ID = 1:length(predizioni_RF)) %>%
+  sample_frac(0.2)
 
 model2 <- data.frame(
-  outcome = ifelse(as.vector(predizioni_KNN) >= as.vector(test_data$label), 1, 0),
+  outcome = ifelse(as.vector(predizioni_KNN) == as.vector(test_data$label), 1, 0),
   algorithm = gl(1, length(predizioni_KNN), length(predizioni_KNN), labels = "KNN"),
-  ID = 1:length(predizioni_KNN))
+  ID = 1:length(predizioni_KNN)) %>%
+  sample_frac(0.2)
 
 model3 <- data.frame(
-  outcome = ifelse(as.vector(predizioni_SVM) >= as.vector(test_data$label), 1, 0),
+  outcome = ifelse(as.vector(predizioni_SVM) == as.vector(test_data$label), 1, 0),
   algorithm = gl(1, length(predizioni_SVM), length(predizioni_SVM), labels = "SVM"),
-  ID = 1:length(predizioni_SVM))
+  ID = 1:length(predizioni_SVM)) %>%
+  sample_frac(0.2)
 
 model4 <- data.frame(
-  outcome = ifelse(as.vector(predizioni_NNE) >= as.vector(test_data$label), 1, 0),
+  outcome = ifelse(as.vector(predizioni_NNE) == as.vector(test_data$label), 1, 0),
   algorithm = gl(1, length(predizioni_NNE), length(predizioni_NNE), labels = "NNE"),
-  ID = 1:length(predizioni_NNE))
+  ID = 1:length(predizioni_NNE)) %>%
+  sample_frac(0.2)
 
 
 # Bind in a single dataframe
@@ -498,7 +505,16 @@ model4 <- data.frame(
 Test <- rbind(model1, model2, model3, model4)
 
 
-# convert the outcome into a factor with 2 levels
+
+# adjust ID values 
+
+Test$ID[Test$algorithm == "RF"] <- 1:sum(Test$algorithm == "RF")
+Test$ID[Test$algorithm == "KNN"] <- 1:sum(Test$algorithm == "KNN")
+Test$ID[Test$algorithm == "SVM"] <- 1:sum(Test$algorithm == "SVM")
+Test$ID[Test$algorithm == "NNE"] <- 1:sum(Test$algorithm == "NNE")
+
+
+# convert the outcome into a factor with 2 levels (not for Test_filtered)
 
 Test$outcome <- factor(
   
@@ -559,7 +575,7 @@ for (name in names(ortho)) {
   previsioni <- terra::predict(ortho[[name]], nn_model, na.rm = TRUE)
   
   classificazione_RF_list[[name]] <- previsioni
-
+  
 }
 
 
